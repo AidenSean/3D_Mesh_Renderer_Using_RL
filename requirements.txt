@@ -1,6 +1,10 @@
+# Core
 torch
 torchvision
 torchaudio
+numpy
+
+# Pixel RL 3D Builder
 diffusers
 transformers
 accelerate
@@ -8,8 +12,18 @@ gymnasium
 stable-baselines3
 SpeechRecognition
 pillow
-numpy
 napari[all]
 pyqt5
 opencv-python
 huggingface_hub
+scikit-image
+trimesh
+
+# Atari Breakout RL (Part 1)
+tyro
+tensorboard
+cleanrl
+gymnasium[atari]
+gymnasium[accept-rom-license]
+ale-py
+shimmy
