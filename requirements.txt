@@ -1,0 +1,15 @@
+torch
+torchvision
+torchaudio
+diffusers
+transformers
+accelerate
+gymnasium
+stable-baselines3
+SpeechRecognition
+pillow
+numpy
+napari[all]
+pyqt5
+opencv-python
+huggingface_hub

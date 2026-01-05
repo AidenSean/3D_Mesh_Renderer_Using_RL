@@ -1,0 +1,182 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{tcolorbox}
+\usepackage{amsmath}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\title{\textbf{Project Deep Dive: Pixel RL 3D Builder} \\ \large \textit{A Detailed yet Simple Explanation of the Algorithms and Code}}
+\author{Team Neural Mavericks}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{1. The Big Idea}
+We wanted to solve a hard problem: **"Can a robot learn to build anything just by hearing a description?"**
+
+Traditional robots are "hard-coded" (e.g., "Move 10 steps, place block"). Our robot is an **AI Agent**. It doesn't know \textit{how} to build; it only knows \textit{what} it needs to build. It has to figure out the "how" all by itself.
+
+To do this, we combined two powerful types of AI:
+\begin{enumerate}
+    \item \textbf{Generative AI:} To create the "Blueprint" (The Imagination).
+    \item \textbf{Reinforcement Learning (RL):} To control the "Robot" (The Muscle).
+\end{enumerate}
+
+\section*{2. The "Brain": Generating the Blueprint}
+Before the robot can build, it needs a plan. We use a pipeline of algorithms to generate this plan from your voice.
+
+\subsection*{Step A: Latent Consistency Model (LCM)}
+\textbf{What it does:} Draws the picture. \\
+Standard AI (like Stable Diffusion) is slow (10+ seconds). We used a newer technology called **LCM (Latent Consistency Model)**. It cheats the math to generate an image in just 4 steps instead of 50.
+\\
+\textbf{The Code:}
+\begin{lstlisting}[language=Python]
+# We load the "Dreamshaper" model
+pipe = AutoPipelineForText2Image.from_pretrained("SimianLuo/LCM_Dreamshaper_v7")
+
+# We tell it to draw simplified Pixel Art
+prompt = "Isometric voxel art of a red car, white background, solid colors"
+image = pipe(prompt, num_inference_steps=4).images[0]
+\end{lstlisting}
+
+\subsection*{Step B: Depth Estimation (Making it 3D)}
+\textbf{What it does:} Guesses the 3D shape. \\
+The image is flat. We use a **Transformer model** called "Depth-Anything" that looks at the colors and shadows to guess how far away each pixel is. We turn this "distance" into "height," extruding the flat image into a 3D block structure.
+
+---
+
+\section*{3. The "Environment": The Robot's World}
+This is the most important part of the project. In Reinforcement Learning, the **Environment** is the game the robot plays. We built a custom environment called `VoxelBuilderEnv`.
+
+\subsection*{The Grid (The World)}
+Imagine a $32 \times 32 \times 32$ box. 
+\begin{itemize}
+    \item **Target Grid:** The blueprint (where blocks SHOULD be).
+    \item **Current Grid:** The actual world (where blocks ARE right now).
+\end{itemize}
+
+\subsection*{The Observation (What the Robot Sees)}
+The robot is blind. It cannot see the whole world at once (that would be too much data). It can only see what is right in front of it.
+The **State Vector** has 8 numbers:
+\begin{enumerate}
+    \item \textbf{X, Y, Z Position:} Where am I? (3 numbers)
+    \item \textbf{Current Voxel:} Is there a block here right now? (0 or 1)
+    \item \textbf{Target Voxel:} Should there be a block here? (0 or 1)
+    \item \textbf{Target Color:} What color should it be? (Red, Green, Blue)
+\end{enumerate}
+
+\textbf{The Code (`_get_obs` function):}
+\begin{lstlisting}[language=Python]
+def _get_obs(self):
+    # Get current position
+    x, y, z = self.agent_pos
+    
+    # Check if there is a block at my feet
+    current_val = self.current_grid[x, y, z]
+    
+    # Check if there SHOULD be a block here
+    target_val = self.target_grid[x, y, z]
+    
+    # Return the list of 8 numbers
+    return np.array([x/32, y/32, z/32, current_val, target_val, ...])
+\end{lstlisting}
+
+\subsection*{The Actions (What the Robot Can Do)}
+The robot has a simple controller with **8 buttons** (Discrete Action Space):
+\begin{itemize}
+    \item \textbf{0-5 (Move):} Forward, Back, Left, Right, Up, Down.
+    \item \textbf{6 (Place):} Put a block at my feet.
+    \item \textbf{7 (Remove):} Delete the block at my feet.
+\end{itemize}
+
+\subsection*{The Rewards (How the Robot Learns)}
+This is the "Secret Sauce." How do we tell the robot it did a good job? We use a "Hot or Cold" game called **Reward Shaping**.
+
+\begin{tcolorbox}[colback=green!5!white,colframe=green!75!black,title=The Reward Rules]
+\begin{itemize}
+    \item \textbf{Time Penalty (-0.01):} Every second, you lose points. Speed up!
+    \item \textbf{Good Placement (+1.0):} You placed a block where the blueprint wanted one! Good job!
+    \item \textbf{Bad Placement (-0.5):} You placed a block where there should be empty air. Stop hallucinating!
+    \item \textbf{Destruction (-1.0):} You deleted a correct block. Why did you do that?!
+    \item \textbf{Correction (+0.5):} You deleted a wrong block. Thanks for fixing your mistake.
+    \item \textbf{Completion (+10.0):} The building is perfect. You win!
+\end{itemize}
+\end{tcolorbox}
+
+\textbf{The Code (`step` function):}
+\begin{lstlisting}[language=Python]
+def step(self, action):
+    # 1. Apply Movement
+    if action < 6:
+        self.move_agent(action)
+        reward = -0.01 # Small penalty for taking time
+        
+    # 2. Apply Build Action
+    elif action == 6: # PLACE
+        if self.target[pos] == 1 and self.current[pos] == 0:
+            self.current[pos] = 1 # Place block
+            reward = 1.0          # Big Reward!
+        else:
+            reward = -0.5         # Penalty for wrong placement
+            
+    # 3. Check Game Over
+    if np.array_equal(self.current, self.target):
+        terminated = True
+        reward += 10.0 # BONUS!
+        
+    return obs, reward, terminated, info
+\end{lstlisting}
+
+---
+
+\section*{4. The Solution: Heuristic Agent}
+Since Training RL takes days, we first wrote a "Teacher" algorithm to prove the game is winnable. This is a **Heuristic Agent**. It cheats a little bit to always find the perfect path.
+
+\textbf{How it thinks:}
+\begin{enumerate}
+    \item It looks at the **Difference** between the Current World and the Blueprint.
+    \item It makes a list of every single mistake (missing blocks or extra blocks).
+    \item It finds the **Closest Mistake** to its current position.
+    \item It walks there and fixes it.
+    \item Repeat until zero mistakes.
+\end{enumerate}
+
+\section*{5. Visualization and Output}
+We don't just print numbers. We built a visualizer using **Napari**, a scientific 3D viewer.
+\begin{itemize}
+    \item The agent is shown as a **Red Diamond**.
+    \item The blocks appear in real-time as the agent places them.
+\end{itemize}
+Once finished, we use an algorithm called **Marching Cubes** to smooth the blocky Minecraft-look into a smooth 3D model (like a regular video game asset) and save it as an `.obj` file.
+
+\end{document}
